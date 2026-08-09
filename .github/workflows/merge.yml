@@ -1,134 +1,77 @@
-name: 保守版 - 只换Java不动资源
+name: 重铸酷9 (基于TVBoxOS骨架)
 
 on:
   workflow_dispatch:
     inputs:
       ku9_repo:
-        description: '080java 酷9外壳仓库'
-        required: false
+        description: '酷9仓库'
         default: '9602894/080java'
       ku9_branch:
-        description: '酷9分支'
-        required: false
         default: 'main'
       tvbox_repo:
-        description: 'tytestelle/TVBoxOS 纯净源码仓库'
-        required: false
+        description: 'TVBoxOS仓库'
         default: 'tytestelle/TVBoxOS'
       tvbox_branch:
-        description: 'TVBoxOS分支'
-        required: false
         default: 'main'
 
 jobs:
-  build:
+  recast:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出工作流仓库
+      - name: 检出工作流
         uses: actions/checkout@v4
         with:
           path: workflow
 
-      - name: 检出 080java (酷9外壳)
+      - name: 检出酷9
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.ku9_repo }}
           ref: ${{ github.event.inputs.ku9_branch }}
-          path: 080java
+          path: ku9
 
-      - name: 检出 tytestelle/TVBoxOS (纯净源码)
+      - name: 检出TVBoxOS
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.tvbox_repo }}
           ref: ${{ github.event.inputs.tvbox_branch }}
-          path: TVBoxOS
+          path: tvbox
 
-      - name: 执行保守版合并脚本
+      - name: 执行重铸脚本
         run: |
-          chmod +x workflow/merge_ku9_conservative.sh
-          workflow/merge_ku9_conservative.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
-        shell: bash
+          chmod +x workflow/recast.sh
+          workflow/recast.sh ./ku9 ./tvbox ./output 2>&1 | tee recast.log
 
-      - name: 设置 JDK 17
+      - name: 设置JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 设置 Android SDK
+      - name: 设置Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 创建 local.properties
+      - name: 创建local.properties
         run: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > ./ku9-final/local.properties
-          echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> ./ku9-final/local.properties
-          cat ./ku9-final/local.properties
-        shell: bash
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > ./output/local.properties
 
-      - name: 编译 Java Debug APK
+      - name: 编译
         id: compile
         run: |
-          cd ku9-final
+          cd output
           chmod +x gradlew
           ./gradlew :app:assembleJavaDebug --stacktrace 2>&1 | tee compile.log || true
-
-          APK_PATH="app/build/outputs/apk/java/debug/TVBox_debug-java.apk"
-          if [ -f "$APK_PATH" ]; then
-            echo "COMPILE_SUCCESS=true" >> $GITHUB_ENV
-            echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
-            echo "APK_SIZE=$(du -h $APK_PATH | cut -f1)" >> $GITHUB_ENV
+          if [ -f "app/build/outputs/apk/java/debug/TVBox_debug-java.apk" ]; then
+            echo "SUCCESS=true" >> $GITHUB_ENV
           else
-            echo "COMPILE_SUCCESS=false" >> $GITHUB_ENV
-            grep -E "error:|Error:|找不到|cannot find|does not exist|符号|symbol|FAILED|Duplicate" compile.log | head -300 > compile_errors.txt 2>/dev/null || true
+            echo "SUCCESS=false" >> $GITHUB_ENV
+            grep -E "error:|Error:|FAILED" compile.log | head -200 > errors.txt
           fi
-        shell: bash
         continue-on-error: true
 
-      - name: 上传完整工程
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ku9-final-project
-          path: ku9-final/
+          name: recast-project
+          path: output/
           retention-days: 7
-
-      - name: 上传APK (编译成功)
-        if: env.COMPILE_SUCCESS == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: ku9-final/${{ env.APK_PATH }}
-          retention-days: 7
-
-      - name: 上传编译错误 (编译失败)
-        if: env.COMPILE_SUCCESS == 'false'
-        uses: actions/upload-artifact@v4
-        with:
-          name: compile-errors
-          path: |
-            ku9-final/compile_errors.txt
-            ku9-final/compile.log
-          retention-days: 7
-
-      - name: 上传日志和报告
-        uses: actions/upload-artifact@v4
-        with:
-          name: merge-reports
-          path: |
-            ku9-final/MERGE_REPORT.md
-            merge.log
-          retention-days: 7
-
-      - name: 输出总结
-        run: |
-          echo "========================================"
-          echo "  保守版合并完成"
-          echo "========================================"
-          if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
-            echo "✅ 编译成功！APK: ${{ env.APK_SIZE }}"
-          else
-            echo "⚠️ 编译失败，查看 compile-errors"
-          fi
-          echo ""
-          echo "📁 完整工程: ku9-final-project"
-          echo "📋 报告: merge-reports"
-        shell: bash
