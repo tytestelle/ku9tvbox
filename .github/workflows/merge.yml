@@ -1,183 +1,165 @@
-name: 酷9外壳 + TVBoxOS完整源码 + 官方ijkplayer
+name: 方案B - TVBoxOS基底 + 酷9完整移植
 
 on:
   workflow_dispatch:
     inputs:
+      tvbox_repo:
+        description: 'TVBoxOS 仓库 (可编译基底)'
+        required: false
+        default: '9602894/TVBoxOS'
+      tvbox_branch:
+        description: 'TVBoxOS 分支'
+        required: false
+        default: 'main'
       ku9_repo:
-        description: '080java 酷9外壳仓库'
+        description: '080java 仓库 (酷9功能源)'
         required: false
         default: '9602894/080java'
       ku9_branch:
-        description: '酷9分支'
+        description: '080java 分支'
         required: false
         default: 'main'
-      tvbox_repo:
-        description: 'tytestelle/TVBoxOS 纯净源码仓库'
+      target_branch:
+        description: '推送目标分支 (当前仓库)'
         required: false
-        default: 'tytestelle/TVBoxOS'
-      tvbox_branch:
-        description: 'TVBoxOS分支'
-        required: false
-        default: 'main'
-      ijkplayer_repo:
-        description: 'Bilibili/ijkplayer 官方源码(可选，留空则用TVBoxOS内置)'
-        required: false
-        default: ''
-      ijkplayer_branch:
-        description: 'ijkplayer分支'
-        required: false
-        default: 'master'
+        default: 'transplant'
+
+# 赋予推送权限
+permissions:
+  contents: write
 
 jobs:
-  build:
+  transplant:
     runs-on: ubuntu-latest
     steps:
-      # =====================================================================
-      # Step 1: 检出所有仓库
-      # =====================================================================
       - name: 检出工作流仓库
         uses: actions/checkout@v4
         with:
           path: workflow
 
-      - name: 检出 080java (酷9外壳)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.inputs.ku9_repo }}
-          ref: ${{ github.event.inputs.ku9_branch }}
-          path: 080java
-
-      - name: 检出 tytestelle/TVBoxOS (纯净源码)
+      - name: 检出 TVBoxOS (基底)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.tvbox_repo }}
           ref: ${{ github.event.inputs.tvbox_branch }}
           path: TVBoxOS
 
-      - name: 检出 Bilibili/ijkplayer (官方源码，可选)
-        if: ${{ github.event.inputs.ijkplayer_repo != '' }}
+      - name: 检出 080java (酷9功能源)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.inputs.ijkplayer_repo }}
-          ref: ${{ github.event.inputs.ijkplayer_branch }}
-          path: ijkplayer
+          repository: ${{ github.event.inputs.ku9_repo }}
+          ref: ${{ github.event.inputs.ku9_branch }}
+          path: 080java
 
-      # =====================================================================
-      # Step 2: 执行合并脚本
-      # =====================================================================
-      - name: 执行合并脚本
+      - name: 执行方案B移植脚本
         run: |
-          chmod +x workflow/merge_ku9_final.sh
-          if [ "${{ github.event.inputs.ijkplayer_repo }}" != "" ]; then
-            workflow/merge_ku9_final.sh ./080java ./TVBoxOS ./ku9-final ./ijkplayer 2>&1 | tee merge.log
-          else
-            workflow/merge_ku9_final.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
-          fi
+          chmod +x workflow/transplant_ku9_plan_b.sh
+          workflow/transplant_ku9_plan_b.sh ./TVBoxOS ./080java ./ku9-tvbox 2>&1 | tee transplant.log
         shell: bash
 
-      # =====================================================================
-      # Step 3: 设置构建环境
-      # =====================================================================
       - name: 设置 JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 安装 NDK (用于ijkplayer编译)
-        run: |
-          sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
-        shell: bash
-
-      # =====================================================================
-      # Step 4: 编译
-      # =====================================================================
-      - name: 编译 Debug APK
+      - name: 尝试首次编译
         id: compile
         run: |
-          cd ku9-final
-          chmod +x gradlew
-          # 先尝试java flavor（最常用）
-          ./gradlew :app:assembleJavaDebug --stacktrace 2>&1 | tee compile.log || true
-
-          APK_PATH="app/build/outputs/apk/java/debug/TVBox_debug-java.apk"
-          if [ -f "$APK_PATH" ]; then
+          cd ku9-tvbox
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee compile.log || true
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
             echo "COMPILE_SUCCESS=true" >> $GITHUB_ENV
-            echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
-            echo "APK_SIZE=$(du -h $APK_PATH | cut -f1)" >> $GITHUB_ENV
+            echo "APK_SIZE=$(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)" >> $GITHUB_ENV
           else
             echo "COMPILE_SUCCESS=false" >> $GITHUB_ENV
-            grep -E "error:|Error:|找不到|cannot find|does not exist|符号|symbol|FAILED" compile.log | head -300 > compile_errors.txt 2>/dev/null || true
+            grep -E "(error:|Error:|ERROR|找不到|cannot find|does not exist)" compile.log | head -100 > compile_errors.txt || true
           fi
         shell: bash
         continue-on-error: true
 
-      # =====================================================================
-      # Step 5: 上传产物
-      # =====================================================================
-      - name: 上传完整工程
+      # 保留 artifact 上传（可按需注释）
+      - name: 上传完整移植工程
         uses: actions/upload-artifact@v4
         with:
-          name: ku9-final-project
-          path: ku9-final/
+          name: ku9-tvbox-full-project
+          path: ku9-tvbox/
           retention-days: 7
 
-      - name: 上传APK (编译成功)
+      - name: 上传编译APK (如成功)
         if: env.COMPILE_SUCCESS == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: ku9-final/${{ env.APK_PATH }}
+          path: ku9-tvbox/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
 
-      - name: 上传编译错误 (编译失败)
+      - name: 上传编译错误 (如失败)
         if: env.COMPILE_SUCCESS == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: compile-errors
           path: |
-            ku9-final/compile_errors.txt
-            ku9-final/compile.log
+            ku9-tvbox/compile_errors.txt
+            ku9-tvbox/compile.log
           retention-days: 7
 
       - name: 上传日志和报告
         uses: actions/upload-artifact@v4
         with:
-          name: merge-reports
+          name: transplant-reports
           path: |
-            ku9-final/MERGE_REPORT.md
-            merge.log
+            ku9-tvbox/TRANSPLANT_REPORT.md
+            ku9-tvbox/manifest_diff.patch
+            transplant.log
           retention-days: 7
 
-      # =====================================================================
-      # Step 6: 输出总结
-      # =====================================================================
+      # ======= 新步骤：将生成的工程推送到当前仓库的目标分支 =======
+      - name: 推送工程到本仓库分支
+        run: |
+          # 设置 git 用户
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+
+          # 切换到目标分支（如果不存在则创建）
+          if git ls-remote --heads origin "$TARGET_BRANCH" | grep -q "$TARGET_BRANCH"; then
+            git fetch origin "$TARGET_BRANCH"
+            git checkout "$TARGET_BRANCH"
+          else
+            git checkout --orphan "$TARGET_BRANCH"
+          fi
+
+          # 删除当前目录所有文件（保留 .git）
+          git rm -rf . || true
+          # 将 ku9-tvbox 内容复制到根目录（排除 .git）
+          rsync -av --exclude='.git' ku9-tvbox/ ./
+          # 添加所有文件
+          git add -A
+          # 提交（如果有变更）
+          git commit -m "移植工程 $(date +%Y%m%d_%H%M%S)" || echo "无变更可提交"
+          # 强制推送到远程分支
+          git push -f origin "$TARGET_BRANCH"
+        shell: bash
+
       - name: 输出总结
         run: |
           echo "========================================"
-          echo "  酷9 + TVBoxOS + ijkplayer 合并完成"
+          echo "  方案B 移植完成总结"
           echo "========================================"
           echo ""
           if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
             echo "✅ 编译成功！"
-            echo "📦 APK: ${{ env.APK_SIZE }}"
-            echo "📥 下载: Actions Artifacts -> app-debug-apk"
+            echo "📦 APK大小: ${{ env.APK_SIZE }}"
           else
-            echo "⚠️ 编译失败"
+            echo "⚠️ 编译失败，需要人工修复"
             echo "📋 错误日志: Actions Artifacts -> compile-errors"
           fi
           echo ""
-          echo "📁 完整工程: Actions Artifacts -> ku9-final-project"
-          echo "📋 合并报告: Actions Artifacts -> merge-reports"
+          echo "📁 工程代码已推送到本仓库分支: ${{ github.event.inputs.target_branch }}"
+          echo "   请执行: git fetch && git checkout ${{ github.event.inputs.target_branch }}"
           echo ""
-          echo "工程结构:"
-          echo "  ku9-final/"
-          echo "  ├── app/          ← 酷9外壳 + TVBoxOS源码"
-          echo "  ├── player/       ← 播放器模块（含ijkplayer封装）"
-          echo "  ├── quickjs/      ← QuickJS引擎"
-          echo "  ├── pyramid/      ← Python支持"
-          echo "  └── ..."
+          echo "📥 也可从 Artifacts 下载完整工程备份"
+          echo ""
         shell: bash
