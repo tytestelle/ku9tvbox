@@ -1,4 +1,4 @@
-name: 酷9 + TVBoxOS + ijkplayer [v2 修复资源冲突]
+name: 酷9 + TVBoxOS + ijkplayer [v3 彻底清理资源]
 
 on:
   workflow_dispatch:
@@ -43,10 +43,10 @@ jobs:
           ref: ${{ github.event.inputs.tvbox_branch }}
           path: TVBoxOS
 
-      - name: 执行v2合并脚本
+      - name: 执行v3合并脚本
         run: |
-          chmod +x workflow/merge_ku9_v2.sh
-          workflow/merge_ku9_v2.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
+          chmod +x workflow/merge_ku9_v3.sh
+          workflow/merge_ku9_v3.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
         shell: bash
 
       - name: 设置 JDK 17
@@ -121,7 +121,7 @@ jobs:
       - name: 输出总结
         run: |
           echo "========================================"
-          echo "  酷9 + TVBoxOS + ijkplayer v2"
+          echo "  酷9 + TVBoxOS + ijkplayer v3"
           echo "========================================"
           if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
             echo "✅ 编译成功！APK: ${{ env.APK_SIZE }}"
