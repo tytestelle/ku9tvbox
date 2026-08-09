@@ -1,0 +1,183 @@
+name: 酷9外壳 + TVBoxOS完整源码 + 官方ijkplayer
+
+on:
+  workflow_dispatch:
+    inputs:
+      ku9_repo:
+        description: '080java 酷9外壳仓库'
+        required: false
+        default: '9602894/080java'
+      ku9_branch:
+        description: '酷9分支'
+        required: false
+        default: 'main'
+      tvbox_repo:
+        description: 'tytestelle/TVBoxOS 纯净源码仓库'
+        required: false
+        default: 'tytestelle/TVBoxOS'
+      tvbox_branch:
+        description: 'TVBoxOS分支'
+        required: false
+        default: 'main'
+      ijkplayer_repo:
+        description: 'Bilibili/ijkplayer 官方源码(可选，留空则用TVBoxOS内置)'
+        required: false
+        default: ''
+      ijkplayer_branch:
+        description: 'ijkplayer分支'
+        required: false
+        default: 'master'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # =====================================================================
+      # Step 1: 检出所有仓库
+      # =====================================================================
+      - name: 检出工作流仓库
+        uses: actions/checkout@v4
+        with:
+          path: workflow
+
+      - name: 检出 080java (酷9外壳)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.ku9_repo }}
+          ref: ${{ github.event.inputs.ku9_branch }}
+          path: 080java
+
+      - name: 检出 tytestelle/TVBoxOS (纯净源码)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.tvbox_repo }}
+          ref: ${{ github.event.inputs.tvbox_branch }}
+          path: TVBoxOS
+
+      - name: 检出 Bilibili/ijkplayer (官方源码，可选)
+        if: ${{ github.event.inputs.ijkplayer_repo != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.ijkplayer_repo }}
+          ref: ${{ github.event.inputs.ijkplayer_branch }}
+          path: ijkplayer
+
+      # =====================================================================
+      # Step 2: 执行合并脚本
+      # =====================================================================
+      - name: 执行合并脚本
+        run: |
+          chmod +x workflow/merge_ku9_final.sh
+          if [ "${{ github.event.inputs.ijkplayer_repo }}" != "" ]; then
+            workflow/merge_ku9_final.sh ./080java ./TVBoxOS ./ku9-final ./ijkplayer 2>&1 | tee merge.log
+          else
+            workflow/merge_ku9_final.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
+          fi
+        shell: bash
+
+      # =====================================================================
+      # Step 3: 设置构建环境
+      # =====================================================================
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK (用于ijkplayer编译)
+        run: |
+          sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
+        shell: bash
+
+      # =====================================================================
+      # Step 4: 编译
+      # =====================================================================
+      - name: 编译 Debug APK
+        id: compile
+        run: |
+          cd ku9-final
+          chmod +x gradlew
+          # 先尝试java flavor（最常用）
+          ./gradlew :app:assembleJavaDebug --stacktrace 2>&1 | tee compile.log || true
+
+          APK_PATH="app/build/outputs/apk/java/debug/TVBox_debug-java.apk"
+          if [ -f "$APK_PATH" ]; then
+            echo "COMPILE_SUCCESS=true" >> $GITHUB_ENV
+            echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
+            echo "APK_SIZE=$(du -h $APK_PATH | cut -f1)" >> $GITHUB_ENV
+          else
+            echo "COMPILE_SUCCESS=false" >> $GITHUB_ENV
+            grep -E "error:|Error:|找不到|cannot find|does not exist|符号|symbol|FAILED" compile.log | head -300 > compile_errors.txt 2>/dev/null || true
+          fi
+        shell: bash
+        continue-on-error: true
+
+      # =====================================================================
+      # Step 5: 上传产物
+      # =====================================================================
+      - name: 上传完整工程
+        uses: actions/upload-artifact@v4
+        with:
+          name: ku9-final-project
+          path: ku9-final/
+          retention-days: 7
+
+      - name: 上传APK (编译成功)
+        if: env.COMPILE_SUCCESS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ku9-final/${{ env.APK_PATH }}
+          retention-days: 7
+
+      - name: 上传编译错误 (编译失败)
+        if: env.COMPILE_SUCCESS == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-errors
+          path: |
+            ku9-final/compile_errors.txt
+            ku9-final/compile.log
+          retention-days: 7
+
+      - name: 上传日志和报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: merge-reports
+          path: |
+            ku9-final/MERGE_REPORT.md
+            merge.log
+          retention-days: 7
+
+      # =====================================================================
+      # Step 6: 输出总结
+      # =====================================================================
+      - name: 输出总结
+        run: |
+          echo "========================================"
+          echo "  酷9 + TVBoxOS + ijkplayer 合并完成"
+          echo "========================================"
+          echo ""
+          if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
+            echo "✅ 编译成功！"
+            echo "📦 APK: ${{ env.APK_SIZE }}"
+            echo "📥 下载: Actions Artifacts -> app-debug-apk"
+          else
+            echo "⚠️ 编译失败"
+            echo "📋 错误日志: Actions Artifacts -> compile-errors"
+          fi
+          echo ""
+          echo "📁 完整工程: Actions Artifacts -> ku9-final-project"
+          echo "📋 合并报告: Actions Artifacts -> merge-reports"
+          echo ""
+          echo "工程结构:"
+          echo "  ku9-final/"
+          echo "  ├── app/          ← 酷9外壳 + TVBoxOS源码"
+          echo "  ├── player/       ← 播放器模块（含ijkplayer封装）"
+          echo "  ├── quickjs/      ← QuickJS引擎"
+          echo "  ├── pyramid/      ← Python支持"
+          echo "  └── ..."
+        shell: bash
