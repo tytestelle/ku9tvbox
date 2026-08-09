@@ -1,4 +1,4 @@
-name: 酷9 + TVBoxOS + ijkplayer [v3 彻底清理资源]
+name: 保守版 - 只换Java不动资源
 
 on:
   workflow_dispatch:
@@ -43,10 +43,10 @@ jobs:
           ref: ${{ github.event.inputs.tvbox_branch }}
           path: TVBoxOS
 
-      - name: 执行v3合并脚本
+      - name: 执行保守版合并脚本
         run: |
-          chmod +x workflow/merge_ku9_v3.sh
-          workflow/merge_ku9_v3.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
+          chmod +x workflow/merge_ku9_conservative.sh
+          workflow/merge_ku9_conservative.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
         shell: bash
 
       - name: 设置 JDK 17
@@ -79,7 +79,7 @@ jobs:
             echo "APK_SIZE=$(du -h $APK_PATH | cut -f1)" >> $GITHUB_ENV
           else
             echo "COMPILE_SUCCESS=false" >> $GITHUB_ENV
-            grep -E "error:|Error:|找不到|cannot find|does not exist|符号|symbol|FAILED" compile.log | head -300 > compile_errors.txt 2>/dev/null || true
+            grep -E "error:|Error:|找不到|cannot find|does not exist|符号|symbol|FAILED|Duplicate" compile.log | head -300 > compile_errors.txt 2>/dev/null || true
           fi
         shell: bash
         continue-on-error: true
@@ -121,7 +121,7 @@ jobs:
       - name: 输出总结
         run: |
           echo "========================================"
-          echo "  酷9 + TVBoxOS + ijkplayer v3"
+          echo "  保守版合并完成"
           echo "========================================"
           if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
             echo "✅ 编译成功！APK: ${{ env.APK_SIZE }}"
