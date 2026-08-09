@@ -1,4 +1,4 @@
-name: 酷9 + TVBoxOS + ijkplayer [修复版]
+name: 酷9 + TVBoxOS + ijkplayer [v2 修复资源冲突]
 
 on:
   workflow_dispatch:
@@ -43,10 +43,10 @@ jobs:
           ref: ${{ github.event.inputs.tvbox_branch }}
           path: TVBoxOS
 
-      - name: 执行修复版合并脚本
+      - name: 执行v2合并脚本
         run: |
-          chmod +x workflow/merge_ku9_fixed.sh
-          workflow/merge_ku9_fixed.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
+          chmod +x workflow/merge_ku9_v2.sh
+          workflow/merge_ku9_v2.sh ./080java ./TVBoxOS ./ku9-final 2>&1 | tee merge.log
         shell: bash
 
       - name: 设置 JDK 17
@@ -58,16 +58,11 @@ jobs:
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 创建 local.properties (pyramid模块需要)
+      - name: 创建 local.properties
         run: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > ./ku9-final/local.properties
           echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> ./ku9-final/local.properties
           cat ./ku9-final/local.properties
-        shell: bash
-
-      - name: 安装 NDK (pyramid模块需要)
-        run: |
-          sdkmanager "ndk;25.2.9519653" "cmake;3.22.1" || true
         shell: bash
 
       - name: 编译 Java Debug APK
@@ -75,7 +70,6 @@ jobs:
         run: |
           cd ku9-final
           chmod +x gradlew
-          # 只构建java flavor，跳过python相关的pyramid问题
           ./gradlew :app:assembleJavaDebug --stacktrace 2>&1 | tee compile.log || true
 
           APK_PATH="app/build/outputs/apk/java/debug/TVBox_debug-java.apk"
@@ -127,12 +121,12 @@ jobs:
       - name: 输出总结
         run: |
           echo "========================================"
-          echo "  酷9 + TVBoxOS + ijkplayer 合并完成"
+          echo "  酷9 + TVBoxOS + ijkplayer v2"
           echo "========================================"
           if [ "${{ env.COMPILE_SUCCESS }}" = "true" ]; then
             echo "✅ 编译成功！APK: ${{ env.APK_SIZE }}"
           else
-            echo "⚠️ 编译失败"
+            echo "⚠️ 编译失败，查看 compile-errors"
           fi
           echo ""
           echo "📁 完整工程: ku9-final-project"
