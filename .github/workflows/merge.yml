@@ -1,4 +1,4 @@
-name: 重铸酷9并推送到目标仓库
+name: 重铸酷9并推送至本仓库
 
 on:
   workflow_dispatch:
@@ -19,39 +19,22 @@ on:
         description: 'TVBoxOS分支'
         required: false
         default: 'main'
-      target_owner:
-        description: '目标仓库所有者 (用户名或组织，建议填写你的用户名)'
+      target_branch:
+        description: '推送目标分支 (默认 recast，若分支不存在将自动创建)'
         required: false
-        default: ''
-      target_repo:
-        description: '目标仓库名称 (若不存在且提供了有效PAT，会自动创建)'
-        required: true
-        default: 'ku9-recast'
-      personal_access_token:
-        description: '个人访问令牌 (需有repo和admin:repo_hook权限，留空则使用GITHUB_TOKEN但无法创建新仓库)'
-        required: false
-      branch:
-        description: '目标分支 (默认 main)'
-        required: false
-        default: 'main'
-      repo_visibility:
-        description: '新仓库可见性 (仅当创建新仓库时生效)'
-        required: false
-        default: 'private'
-        type: choice
-        options:
-          - private
-          - public
+        default: 'recast'
 
 jobs:
   recast_and_push:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出工作流脚本
+      # 检出当前仓库（工作流运行所在的仓库）
+      - name: 检出当前仓库
         uses: actions/checkout@v4
         with:
-          path: workflow
+          path: current_repo
 
+      # 检出酷9 和 TVBoxOS 到其他路径
       - name: 检出酷9
         uses: actions/checkout@v4
         with:
@@ -66,64 +49,38 @@ jobs:
           ref: ${{ github.event.inputs.tvbox_branch }}
           path: tvbox
 
+      # 重铸脚本（注意路径：当前工作目录为 $GITHUB_WORKSPACE）
       - name: 执行重铸脚本
         run: |
-          chmod +x workflow/recast.sh
-          workflow/recast.sh ./ku9 ./tvbox ./output 2>&1 | tee recast.log
+          # 将脚本复制到工作目录并执行
+          cp current_repo/workflow/recast.sh .
+          chmod +x recast.sh
+          ./recast.sh ./ku9 ./tvbox ./output 2>&1 | tee recast.log
 
       - name: 设置Git用户信息
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 创建或验证目标仓库
+      - name: 推送重铸代码到目标分支
         env:
-          GH_TOKEN: ${{ github.event.inputs.personal_access_token || secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.event.inputs.target_owner || github.repository_owner }}
-          REPO: ${{ github.event.inputs.target_repo }}
-          VIS: ${{ github.event.inputs.repo_visibility }}
+          BRANCH: ${{ github.event.inputs.target_branch }}
         run: |
-          echo "目标仓库: ${OWNER}/${REPO}"
-          # 检查仓库是否存在
-          if gh repo view "${OWNER}/${REPO}" >/dev/null 2>&1; then
-            echo "仓库已存在，无需创建"
+          cd current_repo
+          # 切换到目标分支（若不存在则创建）
+          if git show-ref --verify --quiet refs/heads/${BRANCH}; then
+            git checkout ${BRANCH}
           else
-            if [ -n "${{ github.event.inputs.personal_access_token }}" ]; then
-              echo "仓库不存在，使用PAT创建..."
-              if ! gh repo create "${REPO}" --"${VIS}" ; then
-                echo "❌ 创建仓库失败"
-                exit 1
-              fi
-              # 验证创建结果
-              if ! gh repo view "${OWNER}/${REPO}" >/dev/null 2>&1; then
-                echo "❌ 创建后无法访问仓库，可能权限不足"
-                exit 1
-              fi
-              echo "✅ 仓库创建成功"
-            else
-              echo "❌ 仓库不存在且未提供PAT，无法创建"
-              exit 1
-            fi
+            git checkout -b ${BRANCH}
           fi
 
-      - name: 推送代码到目标仓库
-        env:
-          GH_TOKEN: ${{ github.event.inputs.personal_access_token || secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.event.inputs.target_owner || github.repository_owner }}
-          REPO: ${{ github.event.inputs.target_repo }}
-          BRANCH: ${{ github.event.inputs.branch }}
-        run: |
-          # 克隆目标仓库
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${OWNER}/${REPO}.git" target_repo || {
-            echo "❌ 克隆失败"
-            exit 1
-          }
-          cd target_repo
-          # 清空旧内容（保留 .git）
+          # 清空除 .git 外的所有内容（保留 .git）
           find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} \;
-          # 复制新内容
+
+          # 将 ../output/ 的内容复制到当前目录
           cp -r ../output/. .
-          # 添加 README
+
+          # 添加 README（若没有）
           if [ ! -f README.md ]; then
             cat > README.md << 'EOF'
           # 酷9 重铸版 (TVBoxOS骨架 + 酷9UI)
@@ -137,9 +94,12 @@ jobs:
           ./gradlew :app:assembleJavaDebug
           EOF
           fi
+
+          # 添加所有文件并提交
           git add -A
           git commit -m "重铸酷9: $(date +'%Y-%m-%d %H:%M')" || echo "没有新变更"
-          git push -u origin "$BRANCH" --force
+          # 强制推送到远程分支
+          git push -f origin ${BRANCH}
 
       - name: 上传日志（备查）
         uses: actions/upload-artifact@v4
