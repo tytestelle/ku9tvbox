@@ -1,4 +1,4 @@
-name: 重铸酷9并推送到新仓库
+name: 重铸酷9并推送到目标仓库
 
 on:
   workflow_dispatch:
@@ -19,18 +19,22 @@ on:
         description: 'TVBoxOS分支'
         required: false
         default: 'main'
-      new_repo_name:
-        description: '要创建的新仓库名称 (如 ku9-recast)'
+      target_owner:
+        description: '目标仓库所有者 (用户名或组织)'
+        required: true
+        default: '${{ github.repository_owner }}'
+      target_repo:
+        description: '目标仓库名称 (若不存在且提供了PAT，则会自动创建)'
         required: true
         default: 'ku9-recast'
-      new_repo_visibility:
-        description: '新仓库可见性'
-        required: true
-        default: 'private'
-        type: choice
-        options:
-          - private
-          - public
+      personal_access_token:
+        description: '个人访问令牌 (若留空则使用GITHUB_TOKEN，但无法创建新仓库)'
+        required: false
+        type: string
+      branch:
+        description: '目标分支 (默认 main)'
+        required: false
+        default: 'main'
 
 jobs:
   recast_and_push:
@@ -65,35 +69,57 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 创建新仓库并推送
+      - name: 准备推送
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}   # 需要你的个人访问令牌 (repo权限)
+          GH_TOKEN: ${{ github.event.inputs.personal_access_token || secrets.GITHUB_TOKEN }}
+          TARGET_OWNER: ${{ github.event.inputs.target_owner }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          BRANCH: ${{ github.event.inputs.branch }}
         run: |
-          NEW_REPO="${{ github.event.inputs.new_repo_name }}"
-          VISIBILITY="${{ github.event.inputs.new_repo_visibility }}"
-
-          # 创建仓库（如果已存在则跳过，不会报错）
-          gh repo create "$NEW_REPO" --"$VISIBILITY" --clone --push --remote=origin 2>/dev/null || echo "仓库可能已存在，继续克隆..."
-
-          # 如果克隆失败，尝试直接 clone
-          if [ ! -d "$NEW_REPO" ]; then
-            git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/${NEW_REPO}.git" "$NEW_REPO"
+          # 如果提供了 PAT，则尝试创建仓库（若不存在）
+          if [ -n "${{ github.event.inputs.personal_access_token }}" ]; then
+            echo "使用个人访问令牌，尝试创建仓库..."
+            gh repo create "$TARGET_REPO" --private --clone --push --remote=origin 2>/dev/null || echo "仓库可能已存在，跳过创建"
+          else
+            echo "使用 GITHUB_TOKEN，跳过仓库创建（需要仓库已存在）"
           fi
 
-          cd "$NEW_REPO"
+          # 克隆目标仓库（或使用当前仓库）
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_OWNER}/${TARGET_REPO}.git" target_repo || { echo "克隆失败，请确保仓库存在或提供正确的PAT"; exit 1; }
 
-          # 清空旧内容（但保留 .git）
+          cd target_repo
+
+          # 清空旧内容（保留 .git）
           find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} \;
 
           # 将 output 内容复制到仓库根目录
           cp -r ../output/. .
 
-          # 添加README（如果不存在）
-          cat > README.md << 'EOF'
-          # 酷9 重铸版 (基于 TVBoxOS 骨架 + 酷9 UI)
+          # 添加 README（若不存在）
+          if [ ! -f README.md ]; then
+            cat > README.md << 'EOF'
+          # 酷9 重铸版 (TVBoxOS骨架 + 酷9UI)
 
-          本仓库由 GitHub Actions 自动生成，将酷9的UI资源与TVBoxOS的功能骨架合并而成。
+          本仓库由 GitHub Actions 自动生成。
+          - Java 业务逻辑采用 TVBoxOS 标准实现
+          - UI 资源 (res/assets) 保留酷9风格
+          - 酷9混淆代码备份于 `ku9_obfuscated_java/`
 
           ## 编译
-          ```bash
           ./gradlew :app:assembleJavaDebug
+          EOF
+          fi
+
+          # 提交并推送
+          git add -A
+          git commit -m "重铸酷9: $(date +'%Y-%m-%d %H:%M')" || echo "没有新变更"
+          git push -u origin "$BRANCH" --force
+
+      - name: 上传日志（备查）
+        uses: actions/upload-artifact@v4
+        with:
+          name: recast-logs
+          path: |
+            recast.log
+            ./output/MERGE_REPORT.md 2>/dev/null || true
+          retention-days: 7
