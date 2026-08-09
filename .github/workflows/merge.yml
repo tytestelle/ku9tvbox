@@ -34,6 +34,14 @@ on:
         description: '目标分支 (默认 main)'
         required: false
         default: 'main'
+      repo_visibility:
+        description: '新仓库可见性 (仅当创建新仓库时生效)'
+        required: false
+        default: 'private'
+        type: choice
+        options:
+          - private
+          - public
 
 jobs:
   recast_and_push:
@@ -74,6 +82,7 @@ jobs:
           TARGET_OWNER: ${{ github.event.inputs.target_owner || github.repository_owner }}
           TARGET_REPO: ${{ github.event.inputs.target_repo }}
           BRANCH: ${{ github.event.inputs.branch }}
+          VISIBILITY: ${{ github.event.inputs.repo_visibility }}
         run: |
           # 如果提供了 PAT，则尝试创建仓库（若不存在）
           if [ -n "${{ github.event.inputs.personal_access_token }}" ]; then
@@ -83,7 +92,8 @@ jobs:
               echo "仓库已存在，跳过创建"
             else
               echo "仓库不存在，正在创建..."
-              if ! gh repo create "${TARGET_REPO}" --private --clone --push --remote=origin 2>&1; then
+              # 创建仓库（不使用 --clone --push --remote）
+              if ! gh repo create "${TARGET_REPO}" --"${VISIBILITY}" ; then
                 echo "❌ 创建仓库失败！请检查："
                 echo "  1. PAT 是否具有 'repo' 和 'admin:repo_hook' 权限"
                 echo "  2. 目标所有者 '${TARGET_OWNER}' 是否正确，以及你是否拥有在该名下创建仓库的权限"
@@ -147,3 +157,4 @@ jobs:
             recast.log
             ./output/MERGE_REPORT.md 2>/dev/null || true
           retention-days: 7
+✅ 配套脚本 recast.sh（不变）
